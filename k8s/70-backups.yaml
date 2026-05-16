@@ -1,0 +1,105 @@
+---
+# Backup ConfigMap with backup script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-script
+  namespace: skillpulse
+data:
+  backup.sh: |
+    #!/bin/bash
+    set -e
+    DB_USER="skillpulse"
+    DB_PASSWORD="skillpulse123"
+    DB_NAME="skillpulse"
+    BACKUP_PATH="/backups"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    BACKUP_FILE="$BACKUP_PATH/skillpulse_backup_${TIMESTAMP}.sql"
+    
+    mkdir -p "$BACKUP_PATH"
+    
+    echo "[$(date)] Starting backup..."
+    mysqldump -h mysql -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" > "$BACKUP_FILE"
+    gzip "$BACKUP_FILE"
+    
+    echo "[$(date)] Backup completed: ${BACKUP_FILE}.gz"
+    
+    # Keep only last 7 backups
+    ls -t "$BACKUP_PATH"/skillpulse_backup_*.sql.gz | tail -n +8 | xargs -r rm
+    
+    echo "[$(date)] Cleanup completed"
+---
+# PVC for storing backups
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backups
+  namespace: skillpulse
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+# CronJob for automatic backups
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: skillpulse
+spec:
+  # Run backup daily at 2 AM UTC
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: backend
+          containers:
+            - name: backup
+              image: mysql:8.4
+              env:
+                - name: MYSQL_PWD
+                  valueFrom:
+                    secretKeyRef:
+                      name: skillpulse-db
+                      key: MYSQL_PASSWORD
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  DB_USER="skillpulse"
+                  DB_NAME="skillpulse"
+                  BACKUP_PATH="/backups"
+                  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                  BACKUP_FILE="$BACKUP_PATH/skillpulse_backup_${TIMESTAMP}.sql"
+                  
+                  mkdir -p "$BACKUP_PATH"
+                  
+                  echo "[$(date)] Starting backup..."
+                  mysqldump -h mysql -u"$DB_USER" "$DB_NAME" > "$BACKUP_FILE"
+                  gzip "$BACKUP_FILE"
+                  
+                  FILE_SIZE=$(du -h "${BACKUP_FILE}.gz" | cut -f1)
+                  echo "[$(date)] Backup completed: ${BACKUP_FILE}.gz ($FILE_SIZE)"
+                  
+                  ls -t "$BACKUP_PATH"/skillpulse_backup_*.sql.gz | tail -n +8 | xargs -r rm
+                  echo "[$(date)] Cleanup completed"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: backups
+          restartPolicy: OnFailure
+          backoffLimit: 3

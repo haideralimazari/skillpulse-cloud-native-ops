@@ -1,0 +1,43 @@
+name: CD (kind cluster — manifest bump)
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  bump-manifests:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pin backend + frontend images to commit SHA
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          BACKEND_IMAGE="${DOCKER_USER:+${DOCKER_USER}/}skillpulse-backend"
+          FRONTEND_IMAGE="${DOCKER_USER:+${DOCKER_USER}/}skillpulse-frontend"
+          sed -i "/name: skillpulse-backend/,/newName/s|newName: .*|newName: ${BACKEND_IMAGE}|" k8s/kustomization.yaml
+          sed -i "/name: skillpulse-frontend/,/newName/s|newName: .*|newName: ${FRONTEND_IMAGE}|" k8s/kustomization.yaml
+          sed -i "s|newTag: .*|newTag: ${SHA}|" k8s/kustomization.yaml
+
+      - name: Commit + push if changed
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Manifests already pinned to ${SHA}; nothing to commit."
+            exit 0
+          fi
+          git add k8s/kustomization.yaml
+          git commit -m "deploy: pin backend+frontend to ${SHA:0:7}"
+          git push
