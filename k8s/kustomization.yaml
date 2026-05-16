@@ -13,7 +13,7 @@ resources:
 images:
   - name: skillpulse-backend
     newName: haideralimazari/skillpulse-backend
-    newTag: 9ea312de563cf0c884b13e2057f1fe12b77eff1c
+    newTag: cc05e8294a7589e43e7d48d0556a4fb3b2fee9a7
   - name: skillpulse-frontend
     newName: haideralimazari/skillpulse-frontend
-    newTag: 9ea312de563cf0c884b13e2057f1fe12b77eff1c
+    newTag: cc05e8294a7589e43e7d48d0556a4fb3b2fee9a7
