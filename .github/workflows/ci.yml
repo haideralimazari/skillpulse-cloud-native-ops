@@ -86,11 +86,12 @@ jobs:
       - name: Build backend image
         run: |
           docker build -t backend:temp ./backend
+          docker save backend:temp -o backend.tar
 
       - name: Scan backend image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          input: 'backend:temp'
+          input: './backend.tar'
           format: 'table'
 
       - uses: docker/login-action@v4
@@ -120,11 +121,12 @@ jobs:
       - name: Build frontend image
         run: |
           docker build -t frontend:temp ./frontend
+          docker save frontend:temp -o frontend.tar
 
       - name: Scan frontend image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          input: 'frontend:temp'
+          input: './frontend.tar'
           format: 'table'
 
       - uses: docker/login-action@v4
