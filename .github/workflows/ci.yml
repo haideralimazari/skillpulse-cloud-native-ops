@@ -1,5 +1,9 @@
 name: CI
 
+permissions:
+  security-events: read
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -39,7 +43,7 @@ jobs:
           output: 'frontend-trivy.sarif'
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'backend-trivy.sarif'
 
