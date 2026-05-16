@@ -1,4 +1,4 @@
-name: CD (kind cluster — manifest bump)
+name: CD (update k8s manifests with new image shas)
 
 on:
   workflow_run:

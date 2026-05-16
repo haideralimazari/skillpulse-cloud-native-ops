@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  security-scan:
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +25,18 @@ jobs:
           args: detect --source . --verbose --report-format sarif --report-path gitleaks.sarif
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload GitLeaks SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+
+  trivy-code-scan:
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Run Trivy vulnerability scanner (backend)
         uses: aquasecurity/trivy-action@master
@@ -42,27 +54,44 @@ jobs:
           format: 'sarif'
           output: 'frontend-trivy.sarif'
 
-      - name: Upload Trivy results to GitHub Security tab
+      - name: Upload backend SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:
-          sarif_file: 'backend-trivy.sarif'
+          sarif_file: backend-trivy.sarif
 
-      - name: Upload SARIF artifacts on failure or success
+      - name: Upload frontend SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: frontend-trivy.sarif
+
+      - name: Upload Trivy SARIF artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-sarif-results
+          name: trivy-sarif
           path: |
             backend-trivy.sarif
             frontend-trivy.sarif
 
-  build-and-push:
-    needs: security-scan
+  build-push-backend:
+    name: "Build & Push Backend Image"
+    needs: trivy-code-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        run: |
+          docker build -t backend:temp ./backend
+
+      - name: Scan backend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          input: 'backend:temp'
+          format: 'table'
 
       - uses: docker/login-action@v4
         if: ${{ vars.DEPLOY_ENABLED == 'true' }}
@@ -70,48 +99,45 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build backend
-        uses: docker/build-push-action@v7
-        with:
-          context: ./backend
-          push: false
-          tags: backend:temp
-          outputs: type=docker,dest=/tmp/backend.tar
+      - name: Tag and push backend image
+        if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+        run: |
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend', secrets.DOCKERHUB_USERNAME) || 'skillpulse-backend' }}
+          docker tag backend:temp ${IMAGE}:latest
+          docker tag backend:temp ${IMAGE}:${GITHUB_SHA}
+          docker push ${IMAGE}:latest
+          docker push ${IMAGE}:${GITHUB_SHA}
 
-      - name: Build frontend
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          push: false
-          tags: frontend:temp
-          outputs: type=docker,dest=/tmp/frontend.tar
+  build-push-frontend:
+    name: "Build & Push Frontend Image"
+    needs: trivy-code-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Scan backend image for vulnerabilities
-        uses: aquasecurity/trivy-action@master
-        with:
-          input: '/tmp/backend.tar'
-          format: 'table'
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build frontend image
+        run: |
+          docker build -t frontend:temp ./frontend
 
       - name: Scan frontend image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          input: '/tmp/frontend.tar'
+          input: 'frontend:temp'
           format: 'table'
 
-      - name: Push backend to Docker Hub
-        uses: docker/build-push-action@v7
+      - uses: docker/login-action@v4
+        if: ${{ vars.DEPLOY_ENABLED == 'true' }}
         with:
-          context: ./backend
-          push: ${{ vars.DEPLOY_ENABLED == 'true' }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-backend:latest' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-backend:{0}', github.sha) }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Push frontend to Docker Hub
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          push: ${{ vars.DEPLOY_ENABLED == 'true' }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-frontend:latest' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-frontend:{0}', github.sha) }}
+      - name: Tag and push frontend image
+        if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+        run: |
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend', secrets.DOCKERHUB_USERNAME) || 'skillpulse-frontend' }}
+          docker tag frontend:temp ${IMAGE}:latest
+          docker tag frontend:temp ${IMAGE}:${GITHUB_SHA}
+          docker push ${IMAGE}:latest
+          docker push ${IMAGE}:${GITHUB_SHA}
