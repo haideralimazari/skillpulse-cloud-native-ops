@@ -12,8 +12,8 @@ resources:
   - 70-backups.yaml
 images:
   - name: skillpulse-backend
-    newName: skillpulse-backend
-    newTag: latest
+    newName: haideralimazari/skillpulse-backend
+    newTag: 9ea312de563cf0c884b13e2057f1fe12b77eff1c
   - name: skillpulse-frontend
-    newName: skillpulse-frontend
-    newTag: latest
+    newName: haideralimazari/skillpulse-frontend
+    newTag: 9ea312de563cf0c884b13e2057f1fe12b77eff1c
