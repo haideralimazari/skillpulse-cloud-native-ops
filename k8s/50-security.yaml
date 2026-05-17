@@ -1,72 +1,3 @@
----
-# ServiceAccount for backend
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: backend
-  namespace: skillpulse
----
-# ServiceAccount for frontend
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: frontend
-  namespace: skillpulse
----
-# Role for backend (read-only secrets)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: backend-role
-  namespace: skillpulse
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["skillpulse-db"]
-    verbs: ["get"]
----
-# Role for frontend (minimal permissions)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: frontend-role
-  namespace: skillpulse
-rules:
-  - apiGroups: [""]
-    resources: []
-    verbs: []
----
-# RoleBinding for backend
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: backend-rolebinding
-  namespace: skillpulse
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: backend-role
-subjects:
-  - kind: ServiceAccount
-    name: backend
-    namespace: skillpulse
----
-# RoleBinding for frontend
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: frontend-rolebinding
-  namespace: skillpulse
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: frontend-role
-subjects:
-  - kind: ServiceAccount
-    name: frontend
-    namespace: skillpulse
----
-# Network Policy: Deny all ingress by default
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -74,86 +5,44 @@ metadata:
   namespace: skillpulse
 spec:
   podSelector: {}
+  policyTypes:
     - Ingress
-  apiVersion: v1
-  kind: ConfigMap
-  metadata:
-    name: pod-security-guidance
-    namespace: skillpulse
-  data:
-    README: |
-      PodSecurityPolicy (PSP) has been removed because it's deprecated and
-      caused an apply-time parsing issue in some kustomize/kubectl versions.
-
-      Use Kubernetes Pod Security Admission (PSA) or an external policy
-      controller (e.g., OPA Gatekeeper) in production to enforce pod
-      security constraints. Example PSA labels can be applied at the
-      namespace level:
-
-        kubectl label --overwrite ns skillpulse pod-security.kubernetes.io/enforce=baseline
-
-      If you specifically need a PSP object for older clusters, re-add one
-      in a separate manifest and apply it directly (not via kustomize).
-              app: frontend
-      ports:
-        - protocol: TCP
-          port: 8080
 ---
-# Network Policy: Allow MySQL to receive from backend
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-mysql-from-backend
+  name: frontend-policy
   namespace: skillpulse
 spec:
   podSelector:
     matchLabels:
-      app: mysql
+      app: skillpulse-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-policy
+  namespace: skillpulse
+spec:
+  podSelector:
+    matchLabels:
+      app: skillpulse-backend
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector:
             matchLabels:
-              app: backend
+              app: skillpulse-frontend
       ports:
         - protocol: TCP
-          port: 3306
----
-# Pod Security Policy (for strict container security)
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: skillpulse-restricted
-spec:
-  privileged: false
-  allowPrivilegeEscalation: false
-  requiredDropCapabilities:
-    - ALL
-  volumes:
-    - configMap
-    - emptyDir
-    - projected
-    - secret
-    - downwardAPI
-    - persistentVolumeClaim
-  hostNetwork: false
-  hostIPC: false
-  hostPID: false
-  runAsUser:
-    rule: MustRunAsNonRoot
-  runAsGroup:
-    rule: MustRunAs
-    ranges:
-      - min: 1
-        max: 65535
-  seLinux:
-    rule: MustRunAs
-    seLinuxOptions:
-      level: s0:c123,c456
-  fsGroup:
-    rule: MustRunAs
-    ranges:
-      - min: 1
-        max: 65535
-  readOnlyRootFilesystem: false
+          port: 5000
